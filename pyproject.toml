@@ -2,7 +2,8 @@
 name = "first-aid-ai-agent"
 version = "0.1.0"
 description = "Final capstone project for the AI Practitioner course"
-authors = ["Mahdi Khrrousheh <mahdi.khrrousheh@gmail.com>"]
+authors = ["Mahdi Khrrousheh <mahdi.khrrousheh@gmail.com>" , "Monther Nabulsi <m.nabulsi00@gmail.com>"]
+package-mode = false
 readme = "README.md"
 
 [tool.poetry.dependencies]
