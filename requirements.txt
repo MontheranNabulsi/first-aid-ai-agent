@@ -5,3 +5,5 @@ google-generativeai
 streamlit-folium
 geopy
 pandas-stubs
+requests
+streamlit-js-eval
