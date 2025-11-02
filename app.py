@@ -84,6 +84,8 @@ if 'voice_assistant_enabled' not in st.session_state:
     st.session_state.voice_assistant_enabled = False
 if 'last_spoken' not in st.session_state:
     st.session_state.last_spoken = None
+if 'use_premium_voices' not in st.session_state:
+    st.session_state.use_premium_voices = True  # Use best available voices
 
 # Sidebar options
 with st.sidebar:
@@ -99,6 +101,18 @@ with st.sidebar:
     st.session_state.voice_assistant_enabled = voice_enabled
     
     if voice_enabled:
+        # Premium voice settings
+        st.session_state.use_premium_voices = st.checkbox(
+            "🎙️ Premium Voices (Natural/Siri-like)", 
+            value=st.session_state.get('use_premium_voices', True),
+            help="Uses the best available neural voices for natural speech (like Siri/Gemini)"
+        )
+        
+        # Welcome message on first enable
+        if 'voice_welcome_shown' not in st.session_state:
+            speak_welcome_message()
+            st.session_state.voice_welcome_shown = True
+        
         col1, col2 = st.columns(2)
         with col1:
             if st.button("🎤 Listen", use_container_width=True):
@@ -132,7 +146,8 @@ with st.sidebar:
 # Handle voice commands
 if st.session_state.get('listen_command', False) and st.session_state.voice_assistant_enabled:
     with st.spinner("🎤 Listening..."):
-        speak_text("Listening for your command...", rate=1.2)
+        use_premium = st.session_state.get('use_premium_voices', True)
+        speak_text("I'm listening. Please speak your command now.", rate=0.92, pitch=1.0, use_google_tts=use_premium and "GCP_TTS_API_KEY" in st.secrets)
         command_result = listen_for_command()
         
         if command_result and 'text' in command_result:
@@ -143,17 +158,18 @@ if st.session_state.get('listen_command', False) and st.session_state.voice_assi
                 if action in ["First Aid Guide", "Find Nearby Hospitals", "📋 My Health Records"]:
                     # Navigate to page
                     page = action
-                    speak_text(f"Navigating to {action}", rate=1.1)
+                    speak_text(f"Of course! Taking you to {action} now.", rate=0.9, pitch=1.13)
                     st.rerun()
                 elif action == "read_first_aid_steps":
                     if st.session_state.get('last_spoken'):
-                        speak_text("Reading first aid steps. " + st.session_state.last_spoken)
+                        announce_first_aid_steps(st.session_state.last_spoken)
                 elif action == "show_voice_help":
                     speak_help_message()
                 elif action == "stop_speaking":
                     stop_speaking()
+                    speak_text("I've stopped speaking. How else can I help?", rate=0.9, pitch=1.12)
             else:
-                speak_text(f"I didn't understand '{command}'. Say 'help' to hear available commands.")
+                speak_text(f"I'm sorry, I didn't quite catch that. You said '{command}'. Please say 'help' to hear all available commands.", rate=0.88, pitch=1.1)
         
         st.session_state.listen_command = False
 
