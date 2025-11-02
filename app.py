@@ -6,8 +6,10 @@ from utils.map_helper import (
     show_facilities_map, 
     parse_facilities_to_df,
     reverse_geocode,
-    get_navigation_url
+    get_navigation_url,
+    create_interactive_map
 )
+from streamlit_folium import folium_static
 from utils.ai_helpers import analyze_image, generate_first_aid_steps
 from streamlit_js_eval import streamlit_js_eval
 
@@ -187,7 +189,13 @@ elif page == "Find Nearby Hospitals":
                             
                             st.markdown("---")
                             st.markdown("### 📍 Hospital Locations Map")
-                            st.map(combined_df, zoom=13)
+                            st.markdown("*Click on any red marker to see hospital details and open navigation*")
+                            # Create and display interactive map with clickable markers
+                            interactive_map = create_interactive_map(facilities_df, lat, lon)
+                            if interactive_map:
+                                folium_static(interactive_map, width=700, height=500)
+                            else:
+                                st.map(combined_df, zoom=13)
                             
                             # Show facilities in a list with navigation buttons
                             st.markdown("### 📋 Hospitals Nearby")
@@ -237,7 +245,13 @@ elif page == "Find Nearby Hospitals":
                     
                     st.markdown("---")
                     st.markdown("### 📍 Hospital Locations Map")
-                    st.map(combined_df, zoom=13)
+                    st.markdown("*Click on any red marker to see hospital details and open navigation*")
+                    # Create and display interactive map with clickable markers
+                    interactive_map = create_interactive_map(facilities_df, lat, lon)
+                    if interactive_map:
+                        folium_static(interactive_map, width=700, height=500)
+                    else:
+                        st.map(combined_df, zoom=13)
                     
                     # Show facilities in a list with navigation buttons
                     st.markdown("### 📋 Hospitals Nearby")
@@ -260,7 +274,13 @@ elif page == "Find Nearby Hospitals":
                 if not facilities_df.empty:
                     st.markdown("---")
                     st.markdown("### 📍 Hospital Locations Map")
-                    show_facilities_map(facilities_df)
+                    st.markdown("*Click on any red marker to see hospital details and open navigation*")
+                    # Create and display interactive map with clickable markers
+                    interactive_map = create_interactive_map(facilities_df)
+                    if interactive_map:
+                        folium_static(interactive_map, width=700, height=500)
+                    else:
+                        show_facilities_map(facilities_df)
                     
                     # Show facilities in a list with navigation buttons
                     st.markdown("---")

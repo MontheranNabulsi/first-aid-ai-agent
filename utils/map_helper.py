@@ -5,6 +5,8 @@ import re
 import requests
 from typing import Tuple, Optional
 from streamlit_js_eval import streamlit_js_eval
+import folium
+from streamlit_folium import folium_static
 
 
 
@@ -311,6 +313,86 @@ def show_facilities_results(location_query: str):
         st.dataframe(facilities_df, use_container_width=True)
     else:
         st.info("Gemini returned text results only — no coordinates available for mapping.")
+
+
+def create_interactive_map(facilities_df: pd.DataFrame, user_lat: float = None, user_lon: float = None):
+    """
+    Creates an interactive Folium map with clickable markers that open navigation.
+    Each marker when clicked will open the device's map app with directions.
+    """
+    if facilities_df.empty or not {"lat", "lon"}.issubset(facilities_df.columns):
+        return None
+    
+    # Calculate center of map
+    if user_lat and user_lon:
+        center_lat = (user_lat + facilities_df['lat'].mean()) / 2
+        center_lon = (user_lon + facilities_df['lon'].mean()) / 2
+        zoom_start = 13
+    else:
+        center_lat = facilities_df['lat'].mean()
+        center_lon = facilities_df['lon'].mean()
+        zoom_start = 12
+    
+    # Create Folium map
+    m = folium.Map(
+        location=[center_lat, center_lon],
+        zoom_start=zoom_start,
+        tiles='OpenStreetMap'
+    )
+    
+    # Add user location marker if provided
+    if user_lat and user_lon:
+        folium.Marker(
+            [user_lat, user_lon],
+            popup=folium.Popup(
+                "<b>Your Location</b>",
+                max_width=200
+            ),
+            icon=folium.Icon(color='blue', icon='home'),
+            tooltip="Your Location"
+        ).add_to(m)
+    
+    # Add hospital markers with clickable navigation
+    for idx, row in facilities_df.iterrows():
+        if pd.notna(row.get('lat')) and pd.notna(row.get('lon')):
+            name = row.get('name', 'Hospital')
+            address = row.get('address', '')
+            lat = float(row['lat'])
+            lon = float(row['lon'])
+            
+            # Create navigation URL
+            nav_url = get_navigation_url(lat, lon, name)
+            
+            # Create popup HTML with navigation link that opens map app
+            # When user clicks the marker, popup shows with a Navigate button
+            popup_html = f"""
+            <div style="text-align: center; padding: 5px;">
+                <b style="font-size: 14px;">{name}</b><br>
+                <small style="color: #666;">{address}</small><br><br>
+                <a href="{nav_url}" target="_blank" onclick="window.open('{nav_url}', '_blank'); return false;" 
+                   style="
+                    display: inline-block;
+                    margin-top: 5px;
+                    padding: 10px 20px;
+                    background-color: #1f77b4;
+                    color: white !important;
+                    text-decoration: none;
+                    border-radius: 5px;
+                    font-weight: bold;
+                    font-size: 13px;
+                ">🗺️ Navigate</a>
+            </div>
+            """
+            
+            # Add marker with clickable popup
+            folium.Marker(
+                [lat, lon],
+                popup=folium.Popup(popup_html, max_width=280, parse_html=False),
+                tooltip=f"Click to navigate to {name}",
+                icon=folium.Icon(color='red', icon='info-sign')
+            ).add_to(m)
+    
+    return m
 
 
 def show_facilities_map(facilities_df: pd.DataFrame):

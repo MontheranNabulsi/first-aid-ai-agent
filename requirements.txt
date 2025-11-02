@@ -2,6 +2,7 @@ streamlit
 pandas
 pillow
 google-generativeai
+folium
 streamlit-folium
 geopy
 pandas-stubs
