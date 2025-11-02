@@ -5,10 +5,31 @@ from utils.map_helper import (
     find_nearby_facilities_by_coords,
     show_facilities_map, 
     parse_facilities_to_df,
-    reverse_geocode
+    reverse_geocode,
+    get_navigation_url
 )
 from utils.ai_helpers import analyze_image, generate_first_aid_steps
 from streamlit_js_eval import streamlit_js_eval
+
+
+def display_hospital_with_navigation(row, idx):
+    """Display a hospital entry with navigation button to open map app"""
+    col1, col2 = st.columns([3, 1])
+    
+    with col1:
+        if "lat" in row and "lon" in row:
+            st.markdown(f"**{idx + 1}. {row['name']}**")
+            st.markdown(f"📍 {row['address']}")
+            st.caption(f"Coordinates: ({row['lat']:.4f}, {row['lon']:.4f})")
+        else:
+            st.markdown(f"**{idx + 1}. {row['name']}**")
+            st.markdown(f"📍 {row['address']}")
+    
+    with col2:
+        if "lat" in row and "lon" in row:
+            nav_url = get_navigation_url(row['lat'], row['lon'], row['name'])
+            # Open navigation URL in device's map app (Google Maps, Apple Maps, etc.)
+            st.link_button("🗺️ Navigate", nav_url, use_container_width=True)
 
 
 st.set_page_config(page_title="🩹 First Aid Assistant", layout="wide")
@@ -168,16 +189,11 @@ elif page == "Find Nearby Hospitals":
                             st.markdown("### 📍 Hospital Locations Map")
                             st.map(combined_df, zoom=13)
                             
-                            # Show facilities in a list
+                            # Show facilities in a list with navigation buttons
                             st.markdown("### 📋 Hospitals Nearby")
+                            st.markdown("*Click the 🗺️ Navigate button to open directions in your device's map app*")
                             for idx, row in facilities_df.iterrows():
-                                if "lat" in row and "lon" in row:
-                                    st.markdown(f"**{idx + 1}. {row['name']}**")
-                                    st.markdown(f"📍 {row['address']}")
-                                    st.markdown(f"Coordinates: ({row['lat']:.4f}, {row['lon']:.4f})")
-                                else:
-                                    st.markdown(f"**{idx + 1}. {row['name']}**")
-                                    st.markdown(f"📍 {row['address']}")
+                                display_hospital_with_navigation(row, idx)
                                 st.markdown("---")
                 else:
                     # Still waiting for user to respond to the native browser permission popup
@@ -223,16 +239,11 @@ elif page == "Find Nearby Hospitals":
                     st.markdown("### 📍 Hospital Locations Map")
                     st.map(combined_df, zoom=13)
                     
-                    # Show facilities in a list
+                    # Show facilities in a list with navigation buttons
                     st.markdown("### 📋 Hospitals Nearby")
+                    st.markdown("*Click the 🗺️ Navigate button to open directions in your device's map app*")
                     for idx, row in facilities_df.iterrows():
-                        if "lat" in row and "lon" in row:
-                            st.markdown(f"**{idx + 1}. {row['name']}**")
-                            st.markdown(f"📍 {row['address']}")
-                            st.markdown(f"Coordinates: ({row['lat']:.4f}, {row['lon']:.4f})")
-                        else:
-                            st.markdown(f"**{idx + 1}. {row['name']}**")
-                            st.markdown(f"📍 {row['address']}")
+                        display_hospital_with_navigation(row, idx)
                         st.markdown("---")
     
     # Handle manual search by address (independent of location permission)
@@ -250,5 +261,13 @@ elif page == "Find Nearby Hospitals":
                     st.markdown("---")
                     st.markdown("### 📍 Hospital Locations Map")
                     show_facilities_map(facilities_df)
+                    
+                    # Show facilities in a list with navigation buttons
+                    st.markdown("---")
+                    st.markdown("### 📋 Hospitals Nearby")
+                    st.markdown("*Click the 🗺️ Navigate button to open directions in your device's map app*")
+                    for idx, row in facilities_df.iterrows():
+                        display_hospital_with_navigation(row, idx)
+                        st.markdown("---")
         else:
             st.warning("Please enter a valid location.")

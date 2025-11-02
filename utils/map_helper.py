@@ -59,6 +59,28 @@ def geocode_address(address: str) -> Optional[Tuple[float, float]]:
         return None
 
 
+def get_navigation_url(lat: float, lon: float, name: str = None) -> str:
+    """
+    Generates a navigation URL that opens the device's default map application.
+    Works with Google Maps, Apple Maps, Waze, and other map apps.
+    
+    The URL format used is Google Maps Directions API, which:
+    - Opens Google Maps app on mobile if installed
+    - Falls back to Apple Maps on iOS if Google Maps not installed
+    - Works on desktop browsers (opens Google Maps web)
+    - Compatible with Waze and other map apps that handle Google Maps URLs
+    """
+    # Google Maps Directions URL - works across platforms and opens native app if installed
+    # Using 'dir' parameter for turn-by-turn navigation with destination
+    if name:
+        # URL encode the name for better compatibility
+        import urllib.parse
+        encoded_name = urllib.parse.quote(name)
+        return f"https://www.google.com/maps/dir/?api=1&destination={lat},{lon}&destination_place_id=&q={encoded_name}"
+    else:
+        return f"https://www.google.com/maps/dir/?api=1&destination={lat},{lon}"
+
+
 def reverse_geocode(lat: float, lon: float) -> Optional[str]:
     """
     Reverse geocodes coordinates to get an address using Nominatim (OpenStreetMap).
