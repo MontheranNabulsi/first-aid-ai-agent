@@ -1,4 +1,4 @@
-# FirstAid AI MVP
+# 🩹 AidNexus - AI First Aid Assistant
 
 A minimal viable product (MVP) for an AI-powered first aid assistant built using **Streamlit** and the **Google Gemini API**.
 

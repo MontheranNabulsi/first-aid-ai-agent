@@ -430,7 +430,7 @@ def process_voice_command(command: str) -> Optional[str]:
 def speak_welcome_message(use_premium: bool = True) -> bool:
     """Welcome message for voice assistant with friendly, professional tone."""
     welcome = """
-    Hello! Welcome to the First Aid Assistant. I'm your voice assistant, and I'm here to help.
+    Hello! Welcome to AidNexus, your AI-powered First Aid Assistant. I'm your voice assistant, and I'm here to help.
     You can navigate the entire application using voice commands.
     Simply say 'help' anytime to hear all available commands.
     To navigate, say the page name, like 'First Aid Guide' or 'My Health Records'.
