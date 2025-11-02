@@ -10,7 +10,41 @@ from utils.map_helper import (
     create_interactive_map
 )
 from streamlit_folium import folium_static
-from utils.ai_helpers import analyze_image, generate_first_aid_steps
+from utils.ai_helpers import (
+    analyze_image, 
+    generate_first_aid_steps, 
+    assess_emergency_level,
+    get_medical_disclaimer
+)
+from utils.health_records import (
+    init_health_records,
+    create_injury_record,
+    save_record,
+    get_all_records,
+    get_record,
+    filter_records,
+    update_recovery_progress,
+    mark_first_aid_step_completed,
+    add_note_to_record,
+    add_medication,
+    get_statistics,
+    format_record_date,
+    get_record_age_days,
+    delete_record
+)
+from utils.voice_assistant import (
+    speak_text,
+    stop_speaking,
+    listen_for_command,
+    announce_page_content,
+    announce_injury_analysis,
+    announce_first_aid_steps,
+    announce_record_created,
+    announce_statistics,
+    process_voice_command,
+    speak_welcome_message,
+    speak_help_message
+)
 from streamlit_js_eval import streamlit_js_eval
 
 
@@ -42,14 +76,116 @@ st.markdown(
     "You can also find nearby hospitals."
 )
 
+# Initialize health records
+init_health_records()
+
+# Initialize voice assistant
+if 'voice_assistant_enabled' not in st.session_state:
+    st.session_state.voice_assistant_enabled = False
+if 'last_spoken' not in st.session_state:
+    st.session_state.last_spoken = None
+
 # Sidebar options
 with st.sidebar:
     st.header("Navigation")
-    page = st.radio("Go to:", ["First Aid Guide", "Find Nearby Hospitals"])
+    
+    # Voice Assistant Toggle
+    st.markdown("---")
+    voice_enabled = st.checkbox(
+        "🎤 Voice Assistant (Accessibility)",
+        value=st.session_state.voice_assistant_enabled,
+        help="Enable voice commands and audio announcements for accessibility"
+    )
+    st.session_state.voice_assistant_enabled = voice_enabled
+    
+    if voice_enabled:
+        col1, col2 = st.columns(2)
+        with col1:
+            if st.button("🎤 Listen", use_container_width=True):
+                st.session_state.listen_command = True
+        with col2:
+            if st.button("🔇 Stop", use_container_width=True):
+                stop_speaking()
+                st.session_state.listen_command = False
+        
+        if st.button("❓ Voice Help", use_container_width=True):
+            speak_help_message()
+    
+    st.markdown("---")
+    page = st.radio("Go to:", ["First Aid Guide", "Find Nearby Hospitals", "📋 My Health Records"])
+    
+    # Quick stats in sidebar
+    if page == "📋 My Health Records":
+        stats = get_statistics()
+        if stats["total_records"] > 0:
+            st.markdown("---")
+            st.markdown("### 📊 Quick Stats")
+            st.metric("Total Records", stats["total_records"])
+            st.metric("Active Injuries", stats["active_injuries"])
+            st.metric("Healed", stats["healed_injuries"])
+            
+            # Announce stats if voice enabled
+            if voice_enabled and st.session_state.get('announce_stats', False):
+                announce_statistics(stats)
+                st.session_state.announce_stats = False
+
+# Handle voice commands
+if st.session_state.get('listen_command', False) and st.session_state.voice_assistant_enabled:
+    with st.spinner("🎤 Listening..."):
+        speak_text("Listening for your command...", rate=1.2)
+        command_result = listen_for_command()
+        
+        if command_result and 'text' in command_result:
+            command = command_result['text']
+            action = process_voice_command(command)
+            
+            if action:
+                if action in ["First Aid Guide", "Find Nearby Hospitals", "📋 My Health Records"]:
+                    # Navigate to page
+                    page = action
+                    speak_text(f"Navigating to {action}", rate=1.1)
+                    st.rerun()
+                elif action == "read_first_aid_steps":
+                    if st.session_state.get('last_spoken'):
+                        speak_text("Reading first aid steps. " + st.session_state.last_spoken)
+                elif action == "show_voice_help":
+                    speak_help_message()
+                elif action == "stop_speaking":
+                    stop_speaking()
+            else:
+                speak_text(f"I didn't understand '{command}'. Say 'help' to hear available commands.")
+        
+        st.session_state.listen_command = False
+
+# Announce page navigation if voice enabled
+if st.session_state.voice_assistant_enabled:
+    page_announcements = {
+        "First Aid Guide": "First Aid Guide page. Upload an image or describe an injury to get first aid instructions.",
+        "Find Nearby Hospitals": "Find Nearby Hospitals page. Search for nearby medical facilities.",
+        "📋 My Health Records": "My Health Records page. View and manage your injury history."
+    }
+    if 'current_page' not in st.session_state or st.session_state.current_page != page:
+        if page in page_announcements:
+            announce_page_content(page, page_announcements[page])
+        st.session_state.current_page = page
 
 # --- PAGE 1: First Aid Guide ---
 if page == "First Aid Guide":
     st.subheader("Analyze Injury")
+    
+    # Accessibility: ARIA labels and keyboard navigation hints
+    st.markdown("""
+    <div role="region" aria-label="First Aid Guide">
+    <p style="font-size: 0.9em; color: #666;">
+    💡 <strong>Accessibility:</strong> Use voice assistant (sidebar) for audio navigation. 
+    Say "read steps" to hear first aid instructions. Say "help" for voice commands.
+    </p>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    # Enhanced Mode Toggle
+    use_enhanced_mode = st.checkbox("✨ Enhanced Mode (Recommended)", value=True, 
+                                     help="Enables severity assessment, emergency detection, and structured medical guidance")
 
     uploaded_image = st.file_uploader("Upload an image (optional)", type=["jpg", "jpeg", "png"])
     injury_description = st.text_area("Or describe the injury:")
@@ -57,17 +193,200 @@ if page == "First Aid Guide":
     if st.button("Analyze"):
         if uploaded_image:
             with st.spinner("Analyzing image..."):
-                analysis = analyze_image(uploaded_image)
-                st.success("✅ Image analyzed successfully.")
-                st.markdown(f"**Analysis Result:** {analysis}")
-                st.markdown("### 🩹 First Aid Steps")
-                st.write(generate_first_aid_steps(analysis))
+                if use_enhanced_mode:
+                    # Enhanced mode with structured output
+                    result = analyze_image(uploaded_image, return_structured=True)
+                    st.success("✅ Image analyzed successfully.")
+                    
+                    # Display severity and recommendation
+                    severity = result.get("severity", "UNKNOWN")
+                    if severity == "SEVERE":
+                        st.error(f"🚨 **SEVERE INJURY DETECTED** 🚨\n\n{result.get('recommendation', '')}")
+                    elif severity == "MODERATE":
+                        st.warning(f"⚠️ **MODERATE INJURY** ⚠️\n\n{result.get('recommendation', '')}")
+                    elif severity == "MINOR":
+                        st.success(f"✅ **MINOR INJURY** ✅\n\n{result.get('recommendation', '')}")
+                    
+                    # Show analysis
+                    st.markdown(f"**Analysis Result:**\n{result.get('analysis', '')}")
+                    
+                    # Assess emergency level
+                    emergency_level = assess_emergency_level(result.get('analysis', ''))
+                    if emergency_level == "EMERGENCY":
+                        st.error("🚨 **CALL EMERGENCY SERVICES (911/999/112) IMMEDIATELY** 🚨")
+                    elif emergency_level == "URGENT":
+                        st.warning("⚠️ **URGENT: Seek medical attention within hours** ⚠️")
+                    
+                    # Generate first aid steps with severity context
+                    st.markdown("### 🩹 First Aid Steps")
+                    steps_result = generate_first_aid_steps(
+                        result.get('analysis', ''), 
+                        severity=severity,
+                        return_structured=True
+                    )
+                    
+                    # Extract steps as list for checklist
+                    steps_list = []
+                    if isinstance(steps_result, dict):
+                        steps_text = steps_result.get('steps', '')
+                        # Try to parse steps into list
+                        lines = steps_text.split('\n')
+                        for line in lines:
+                            line = line.strip()
+                            if line and (line[0].isdigit() or line.startswith('•') or line.startswith('-') or line.startswith('*')):
+                                # Clean up step text
+                                step_clean = line.lstrip('0123456789.•-* ).').strip()
+                                if step_clean:
+                                    steps_list.append(step_clean)
+                        
+                        if steps_result.get('needs_emergency'):
+                            st.error("🚨 **URGENT MEDICAL ATTENTION NEEDED** 🚨")
+                        if steps_result.get('has_warnings'):
+                            st.warning("⚠️ **IMPORTANT SAFETY WARNINGS** ⚠️")
+                        st.markdown(steps_text)
+                        
+                        # Voice announcement for accessibility
+                        if st.session_state.voice_assistant_enabled:
+                            announce_injury_analysis(severity, emergency_level, True)
+                            st.session_state.last_spoken = steps_text
+                    else:
+                        st.write(steps_result)
+                        # Try to parse steps from plain text
+                        if isinstance(steps_result, str):
+                            lines = steps_result.split('\n')
+                            for line in lines:
+                                line = line.strip()
+                                if line and (line[0].isdigit() or line.startswith('•')):
+                                    step_clean = line.lstrip('0123456789.•-* ).').strip()
+                                    if step_clean:
+                                        steps_list.append(step_clean)
+                            # Voice announcement
+                            if st.session_state.voice_assistant_enabled:
+                                announce_injury_analysis(severity, emergency_level, True)
+                                st.session_state.last_spoken = steps_result
+                    
+                    # Auto-save to health records
+                    if st.session_state.get('auto_save_records', True):
+                        record = create_injury_record(
+                            injury_description=injury_description or "Image analysis",
+                            severity=severity,
+                            emergency_level=emergency_level,
+                            ai_analysis=result.get('analysis', ''),
+                            first_aid_steps=steps_list if steps_list else [steps_result.get('steps', '')] if isinstance(steps_result, dict) else [steps_result],
+                            images=[uploaded_image] if uploaded_image else None
+                        )
+                        save_record(record)
+                        st.session_state.current_record = record["id"]
+                        st.info("📋 Injury record automatically saved to My Health Records")
+                        
+                        # Voice announcement
+                        if st.session_state.voice_assistant_enabled:
+                            announce_record_created("injury")
+                    
+                    # Option to manually update record
+                    if 'current_record' in st.session_state:
+                        with st.expander("💾 Update Record Details"):
+                            body_part = st.text_input("Body part affected (optional):", key="body_part_img")
+                            location = st.text_input("Where did this occur? (optional):", key="location_img")
+                            if st.button("💾 Update Record Details", key="save_img"):
+                                record = get_record(st.session_state.current_record)
+                                if record:
+                                    if body_part:
+                                        record['body_part'] = body_part
+                                    if location:
+                                        record['location'] = location
+                                    save_record(record)
+                                    st.success("✅ Record updated!")
+                else:
+                    # Original mode
+                    analysis = analyze_image(uploaded_image, return_structured=False)
+                    st.success("✅ Image analyzed successfully.")
+                    st.markdown(f"**Analysis Result:** {analysis}")
+                    st.markdown("### 🩹 First Aid Steps")
+                    st.write(generate_first_aid_steps(analysis, return_structured=False))
+                
+                # Always show medical disclaimer
+                st.markdown("---")
+                st.markdown(get_medical_disclaimer())
+                
         elif injury_description:
             with st.spinner("Analyzing text..."):
-                steps = generate_first_aid_steps(injury_description)
-                st.success("✅ First aid advice ready.")
-                st.markdown("### 🩹 First Aid Steps")
-                st.write(steps)
+                if use_enhanced_mode:
+                    # Assess emergency level first
+                    emergency_level = assess_emergency_level(injury_description)
+                    if emergency_level == "EMERGENCY":
+                        st.error("🚨 **CALL EMERGENCY SERVICES (911/999/112) IMMEDIATELY** 🚨")
+                    elif emergency_level == "URGENT":
+                        st.warning("⚠️ **URGENT: Seek medical attention within hours** ⚠️")
+                    
+                    # Generate enhanced first aid steps
+                    st.success("✅ First aid advice ready.")
+                    st.markdown("### 🩹 First Aid Steps")
+                    steps_result = generate_first_aid_steps(injury_description, return_structured=True)
+                    
+                    # Extract steps as list for checklist
+                    steps_list = []
+                    if isinstance(steps_result, dict):
+                        steps_text = steps_result.get('steps', '')
+                        # Try to parse steps into list
+                        lines = steps_text.split('\n')
+                        for line in lines:
+                            line = line.strip()
+                            if line and (line[0].isdigit() or line.startswith('•') or line.startswith('-') or line.startswith('*')):
+                                step_clean = line.lstrip('0123456789.•-* ).').strip()
+                                if step_clean:
+                                    steps_list.append(step_clean)
+                        
+                        if steps_result.get('has_warnings'):
+                            st.warning("⚠️ **IMPORTANT SAFETY WARNINGS** ⚠️")
+                        st.markdown(steps_text)
+                    else:
+                        st.write(steps_result)
+                        # Try to parse steps from plain text
+                        if isinstance(steps_result, str):
+                            lines = steps_result.split('\n')
+                            for line in lines:
+                                line = line.strip()
+                                if line and (line[0].isdigit() or line.startswith('•')):
+                                    step_clean = line.lstrip('0123456789.•-* ).').strip()
+                                    if step_clean:
+                                        steps_list.append(step_clean)
+                    
+                    # Voice announcement for accessibility
+                    if st.session_state.voice_assistant_enabled:
+                        if isinstance(steps_result, dict):
+                            steps_text = steps_result.get('steps', '')
+                        else:
+                            steps_text = steps_result
+                        announce_injury_analysis("UNKNOWN", emergency_level, True)
+                        st.session_state.last_spoken = steps_text
+                    
+                    # Auto-save to health records
+                    if st.session_state.get('auto_save_records', True):
+                        record = create_injury_record(
+                            injury_description=injury_description,
+                            severity="UNKNOWN",  # Can be enhanced with severity detection
+                            emergency_level=emergency_level,
+                            ai_analysis=injury_description,
+                            first_aid_steps=steps_list if steps_list else [steps_result.get('steps', '')] if isinstance(steps_result, dict) else [steps_result]
+                        )
+                        save_record(record)
+                        st.session_state.current_record = record["id"]
+                        st.info("📋 Injury record automatically saved to My Health Records")
+                        
+                        # Voice announcement
+                        if st.session_state.voice_assistant_enabled:
+                            announce_record_created("injury")
+                else:
+                    # Original mode
+                    steps = generate_first_aid_steps(injury_description, return_structured=False)
+                    st.success("✅ First aid advice ready.")
+                    st.markdown("### 🩹 First Aid Steps")
+                    st.write(steps)
+                
+                # Always show medical disclaimer
+                st.markdown("---")
+                st.markdown(get_medical_disclaimer())
         else:
             st.warning("Please upload an image or describe the injury.")
 
@@ -291,3 +610,307 @@ elif page == "Find Nearby Hospitals":
                         st.markdown("---")
         else:
             st.warning("Please enter a valid location.")
+
+# --- PAGE 3: My Health Records ---
+elif page == "📋 My Health Records":
+    st.header("📋 My Health Records")
+    st.markdown("Track your injury history, recovery progress, and medical records")
+    
+    # Initialize auto-save setting
+    if 'auto_save_records' not in st.session_state:
+        st.session_state.auto_save_records = True
+    
+    # Settings
+    with st.expander("⚙️ Settings"):
+        st.session_state.auto_save_records = st.checkbox(
+            "💾 Auto-save injury records", 
+            value=st.session_state.auto_save_records,
+            help="Automatically save records when analyzing injuries"
+        )
+    
+    # Get statistics
+    stats = get_statistics()
+    total_records = stats["total_records"]
+    
+    if total_records == 0:
+        st.info("📋 No health records yet. Records will be automatically created when you analyze an injury.")
+        st.markdown("### Getting Started")
+        st.markdown("""
+        1. Go to **First Aid Guide** page
+        2. Upload an image or describe an injury
+        3. Click **Analyze**
+        4. Your injury record will be automatically saved here!
+        """)
+    else:
+        # Tabs for different views
+        tab1, tab2, tab3, tab4 = st.tabs(["📋 All Records", "📊 Statistics", "🔍 Search & Filter", "➕ New Record"])
+        
+        with tab1:
+            st.subheader("All Injury Records")
+            
+            # Filter quick buttons
+            col1, col2, col3, col4 = st.columns(4)
+            with col1:
+                filter_status = st.selectbox("Filter by Status", ["All", "active", "healing", "recovering", "healed", "archived"], key="status_filter")
+            with col2:
+                filter_severity = st.selectbox("Filter by Severity", ["All", "SEVERE", "MODERATE", "MINOR", "UNKNOWN"], key="severity_filter")
+            with col3:
+                sort_by = st.selectbox("Sort by", ["Date (Newest)", "Date (Oldest)", "Severity", "Status"], key="sort_by")
+            with col4:
+                if st.button("🔄 Refresh"):
+                    st.rerun()
+            
+            # Get and filter records
+            records = get_all_records()
+            
+            # Apply filters
+            if filter_status != "All":
+                records = [r for r in records if r.get("status") == filter_status]
+            if filter_severity != "All":
+                records = [r for r in records if r.get("severity") == filter_severity]
+            
+            # Sort
+            if "Newest" in sort_by:
+                records = get_all_records(sort_by="timestamp", reverse=True)
+            elif "Oldest" in sort_by:
+                records = get_all_records(sort_by="timestamp", reverse=False)
+            elif "Severity" in sort_by:
+                records = get_all_records(sort_by="severity", reverse=True)
+            
+            # Re-apply filters after sorting
+            if filter_status != "All":
+                records = [r for r in records if r.get("status") == filter_status]
+            if filter_severity != "All":
+                records = [r for r in records if r.get("severity") == filter_severity]
+            
+            if not records:
+                st.info("No records match your filters.")
+            else:
+                st.metric("Total Records Found", len(records))
+                
+                # Display records
+                for idx, record in enumerate(records):
+                    with st.container():
+                        col1, col2, col3 = st.columns([3, 1, 1])
+                        
+                        with col1:
+                            # Record header
+                            severity = record.get("severity", "UNKNOWN")
+                            status = record.get("status", "active")
+                            
+                            if severity == "SEVERE":
+                                st.markdown(f"### 🚨 {record.get('injury_type', 'Unknown Injury')}")
+                            elif severity == "MODERATE":
+                                st.markdown(f"### ⚠️ {record.get('injury_type', 'Unknown Injury')}")
+                            else:
+                                st.markdown(f"### {record.get('injury_type', 'Unknown Injury')}")
+                            
+                            # Record details
+                            st.markdown(f"**Date:** {format_record_date(record)}")
+                            st.markdown(f"**Severity:** {severity} | **Status:** {status.title()}")
+                            if record.get("body_part"):
+                                st.markdown(f"**Body Part:** {record.get('body_part')}")
+                            if record.get("location"):
+                                st.markdown(f"**Location:** {record.get('location')}")
+                            
+                            # Recovery progress
+                            progress = record.get("recovery", {}).get("progress_percentage", 0)
+                            st.progress(progress / 100, text=f"Recovery: {progress}%")
+                        
+                        with col2:
+                            if st.button("👁️ View", key=f"view_{record.get('id')}"):
+                                st.session_state.view_record_id = record.get('id')
+                                st.rerun()
+                        
+                        with col3:
+                            if st.button("🗑️ Delete", key=f"delete_{record.get('id')}"):
+                                if delete_record(record.get('id')):
+                                    st.success("Record deleted!")
+                                    st.rerun()
+                        
+                        st.markdown("---")
+        
+        with tab2:
+            st.subheader("📊 Statistics & Insights")
+            
+            col1, col2, col3, col4 = st.columns(4)
+            with col1:
+                st.metric("Total Records", stats["total_records"])
+            with col2:
+                st.metric("Active Injuries", stats["active_injuries"])
+            with col3:
+                st.metric("Healed", stats["healed_injuries"])
+            with col4:
+                st.metric("Most Common", stats.get("most_common_body_part", "N/A"))
+            
+            # Voice announcement button for accessibility
+            if st.session_state.voice_assistant_enabled:
+                if st.button("🔊 Announce Statistics", key="announce_stats_btn"):
+                    announce_statistics(stats)
+            
+            # Charts
+            col1, col2 = st.columns(2)
+            with col1:
+                st.markdown("### By Severity")
+                if stats.get("by_severity"):
+                    st.bar_chart(stats["by_severity"])
+                else:
+                    st.info("No data available")
+            
+            with col2:
+                st.markdown("### By Status")
+                if stats.get("by_status"):
+                    st.bar_chart(stats["by_status"])
+                else:
+                    st.info("No data available")
+        
+        with tab3:
+            st.subheader("🔍 Search & Filter Records")
+            search_query = st.text_input("Search by injury type, description, or body part:")
+            
+            date_col1, date_col2 = st.columns(2)
+            with date_col1:
+                date_from = st.date_input("From Date", value=None)
+            with date_col2:
+                date_to = st.date_input("To Date", value=None)
+            
+            if st.button("🔍 Search"):
+                from datetime import datetime as dt
+                filtered = filter_records(
+                    search_query=search_query if search_query else None,
+                    date_from=dt.combine(date_from, dt.min.time()) if date_from else None,
+                    date_to=dt.combine(date_to, dt.max.time()) if date_to else None
+                )
+                
+                if filtered:
+                    st.success(f"Found {len(filtered)} records")
+                    for record in filtered:
+                        st.markdown(f"**{record.get('injury_type')}** - {format_record_date(record)}")
+                        if st.button("View", key=f"search_view_{record.get('id')}"):
+                            st.session_state.view_record_id = record.get('id')
+                            st.rerun()
+                else:
+                    st.info("No records found matching your search.")
+        
+        with tab4:
+            st.subheader("➕ Create New Record Manually")
+            injury_type = st.text_input("Injury Type/Description *")
+            severity = st.selectbox("Severity", ["MINOR", "MODERATE", "SEVERE", "UNKNOWN"])
+            body_part = st.text_input("Body Part (optional)")
+            location = st.text_input("Location (optional)")
+            notes = st.text_area("Initial Notes (optional)")
+            
+            if st.button("💾 Create Record"):
+                if injury_type:
+                    record = create_injury_record(
+                        injury_description=injury_type,
+                        severity=severity,
+                        body_part=body_part,
+                        location=location
+                    )
+                    if notes:
+                        add_note_to_record(record["id"], notes)
+                    save_record(record)
+                    st.success("✅ Record created!")
+                    st.rerun()
+                else:
+                    st.warning("Please enter an injury type.")
+    
+    # Detailed record view
+    if 'view_record_id' in st.session_state and st.session_state.view_record_id:
+        st.markdown("---")
+        st.markdown("### 📋 Record Details")
+        
+        record = get_record(st.session_state.view_record_id)
+        if record:
+            # Display record details
+            col1, col2 = st.columns([2, 1])
+            
+            with col1:
+                st.markdown(f"#### {record.get('injury_type', 'Unknown Injury')}")
+                st.markdown(f"**Date:** {format_record_date(record)}")
+                st.markdown(f"**Severity:** {record.get('severity')} | **Status:** {record.get('status').title()}")
+                if record.get('body_part'):
+                    st.markdown(f"**Body Part:** {record.get('body_part')}")
+                if record.get('location'):
+                    st.markdown(f"**Location:** {record.get('location')}")
+                
+                # Initial analysis
+                if record.get('initial_analysis', {}).get('ai_analysis'):
+                    with st.expander("🤖 AI Analysis"):
+                        st.write(record['initial_analysis']['ai_analysis'])
+                
+                # First aid steps
+                st.markdown("### 🩹 First Aid Steps")
+                recommended = record.get('first_aid_steps', {}).get('recommended', [])
+                completed = record.get('first_aid_steps', {}).get('completed', [])
+                
+                if recommended:
+                    for idx, step in enumerate(recommended):
+                        checked = "✅" if idx in completed else "☐"
+                        st.checkbox(f"{checked} {step}", value=(idx in completed), key=f"step_{record.get('id')}_{idx}", 
+                                   disabled=True)
+                else:
+                    st.info("No first aid steps recorded.")
+                
+                # Recovery progress
+                st.markdown("### 📊 Recovery Progress")
+                progress = record.get('recovery', {}).get('progress_percentage', 0)
+                st.progress(progress / 100, text=f"{progress}%")
+                
+                new_progress = st.slider("Update Progress (%)", 0, 100, progress, key=f"progress_{record.get('id')}")
+                pain_level = st.slider("Pain Level (1-10)", 0, 10, record.get('recovery', {}).get('pain_level', 0) or 0, key=f"pain_{record.get('id')}")
+                progress_note = st.text_area("Progress Notes", key=f"note_{record.get('id')}")
+                
+                if st.button("💾 Update Progress", key=f"update_progress_{record.get('id')}"):
+                    update_recovery_progress(record["id"], new_progress, pain_level, progress_note)
+                    st.success("✅ Progress updated!")
+                    st.rerun()
+                
+                # Notes
+                st.markdown("### 📝 Notes")
+                for note in record.get('notes', []):
+                    st.text(f"{format_record_date({'timestamp': note.get('timestamp', '')})}: {note.get('content', '')}")
+                
+                new_note = st.text_area("Add Note", key=f"new_note_{record.get('id')}")
+                if st.button("➕ Add Note", key=f"add_note_{record.get('id')}"):
+                    if new_note:
+                        add_note_to_record(record["id"], new_note)
+                        st.success("✅ Note added!")
+                        st.rerun()
+            
+            with col2:
+                if st.button("← Back to Records"):
+                    if 'view_record_id' in st.session_state:
+                        del st.session_state.view_record_id
+                    st.rerun()
+                
+                # Quick actions
+                st.markdown("### Quick Actions")
+                if st.button("📸 Add Photo", key=f"photo_{record.get('id')}"):
+                    st.session_state.add_photo_to = record.get('id')
+                
+                if 'add_photo_to' in st.session_state and st.session_state.add_photo_to == record.get('id'):
+                    photo = st.file_uploader("Upload Progress Photo", type=["jpg", "jpeg", "png"], key=f"upload_{record.get('id')}")
+                    if photo:
+                        from utils.health_records import add_photo_to_record
+                        add_photo_to_record(record["id"], photo, "during")
+                        st.success("✅ Photo added!")
+                        st.rerun()
+                
+                if st.button("💊 Add Medication", key=f"med_{record.get('id')}"):
+                    st.session_state.add_med_to = record.get('id')
+                
+                if 'add_med_to' in st.session_state and st.session_state.add_med_to == record.get('id'):
+                    med_name = st.text_input("Medication Name", key=f"med_name_{record.get('id')}")
+                    med_dose = st.text_input("Dosage", key=f"med_dose_{record.get('id')}")
+                    if st.button("Save", key=f"save_med_{record.get('id')}"):
+                        if med_name:
+                            add_medication(record["id"], med_name, med_dose)
+                            st.success("✅ Medication added!")
+                            st.rerun()
+        
+        else:
+            st.error("Record not found.")
+            if 'view_record_id' in st.session_state:
+                del st.session_state.view_record_id
