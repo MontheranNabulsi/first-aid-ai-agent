@@ -6,4 +6,4 @@ streamlit-folium
 geopy
 pandas-stubs
 requests
-streamlit-geolocation
+streamlit-js-eval

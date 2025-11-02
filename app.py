@@ -8,7 +8,7 @@ from utils.map_helper import (
     reverse_geocode
 )
 from utils.ai_helpers import analyze_image, generate_first_aid_steps
-from streamlit_geolocation import streamlit_geolocation
+from streamlit_js_eval import streamlit_js_eval
 
 
 st.set_page_config(page_title="🩹 First Aid Assistant", layout="wide")
@@ -55,15 +55,21 @@ elif page == "Find Nearby Hospitals":
     # Initialize session state for location
     if 'user_location' not in st.session_state:
         st.session_state.user_location = None
-    if 'use_auto_location' not in st.session_state:
-        st.session_state.use_auto_location = False
+    if 'location_requested' not in st.session_state:
+        st.session_state.location_requested = False
+    if 'location_permission_granted' not in st.session_state:
+        st.session_state.location_permission_granted = False
     
-    # Option 1: Use Device Location (Auto-detect)
+    # Option 1: Use Device Location - automatically request native browser permission
     col1, col2 = st.columns([1, 1])
     
     with col1:
         st.markdown("**📍 Option 1: Use My Location**")
-        use_location = st.button("🗺️ Detect My Location", type="primary", use_container_width=True)
+        if not st.session_state.location_requested and not st.session_state.location_permission_granted:
+            st.info("📍 Click below to allow location access. Your browser will show a permission popup.")
+            request_location = st.button("📍 Allow Location Access", type="primary", use_container_width=True)
+            if request_location:
+                st.session_state.location_requested = True
     
     with col2:
         st.markdown("**🔍 Option 2: Search by Address**")
@@ -74,83 +80,163 @@ elif page == "Find Nearby Hospitals":
         )
         search_location = st.button("🔍 Search Hospitals", use_container_width=True)
     
-    # Handle geolocation request
-    if use_location:
-        st.session_state.use_auto_location = True
-    
-    # Get user's geolocation if requested
-    if st.session_state.use_auto_location:
-        st.info("📍 **Your browser will now prompt you for location permission.**\n\nYou'll see options to:\n- ✅ **Allow this time** (one-time access)\n- ✅ **Allow always** (remember this choice)\n- ❌ **Deny** (block location access)")
-        
-        # Use streamlit-geolocation component which triggers browser's native permission dialog
-        # The browser's native dialog will show: "Allow this time", "Allow always", or "Deny"
+    # Get user's geolocation using native browser permission (triggered automatically)
+    if st.session_state.location_requested and not st.session_state.location_permission_granted:
+        # Use native browser geolocation API - this triggers the browser's native permission popup
+        # The popup appears in the top-right corner of the browser (native browser UI)
         try:
-            location_data = streamlit_geolocation(key="location_request")
+            location_result = streamlit_js_eval(
+                js_expressions="""
+                new Promise((resolve, reject) => {
+                    if (!navigator.geolocation) {
+                        resolve({error: "Geolocation not supported"});
+                        return;
+                    }
+                    navigator.geolocation.getCurrentPosition(
+                        (position) => {
+                            resolve({
+                                lat: position.coords.latitude,
+                                lon: position.coords.longitude,
+                                success: true
+                            });
+                        },
+                        (error) => {
+                            let errorMsg = "Location access denied";
+                            if (error.code === 1) {
+                                errorMsg = "Location permission denied by user";
+                            } else if (error.code === 2) {
+                                errorMsg = "Location unavailable";
+                            } else if (error.code === 3) {
+                                errorMsg = "Location request timeout";
+                            }
+                            resolve({error: errorMsg});
+                        },
+                        {enableHighAccuracy: true, timeout: 15000, maximumAge: 0}
+                    );
+                })
+                """,
+                key="native_location_permission",
+                want_output=True
+            )
             
             # Check if location was successfully obtained
-            if location_data and isinstance(location_data, dict) and 'latitude' in location_data and 'longitude' in location_data:
-                lat = location_data['latitude']
-                lon = location_data['longitude']
-                st.session_state.user_location = {'lat': lat, 'lon': lon}
-                
-                # Get address from coordinates
-                address = reverse_geocode(lat, lon)
-                
-                if address:
-                    st.success(f"✅ Location detected: {address}")
-                    st.caption(f"Coordinates: {lat:.6f}, {lon:.6f}")
-                else:
-                    st.success(f"✅ Location detected at coordinates: {lat:.6f}, {lon:.6f}")
-                
-                # Automatically search for hospitals
-                with st.spinner("🔍 Searching nearby hospitals..."):
-                    results_text = find_nearby_facilities_by_coords(lat, lon)
-                    st.markdown("### 🏥 Nearby Hospitals")
-                    st.markdown(results_text)
+            if location_result and isinstance(location_result, dict):
+                if 'error' in location_result:
+                    error_msg = location_result['error']
+                    if "denied" in error_msg.lower() or "permission" in error_msg.lower():
+                        st.warning("⚠️ Location permission denied. Please allow location access in your browser settings or try searching by address.")
+                    else:
+                        st.warning(f"⚠️ Unable to get your location: {error_msg}. Please try searching by address.")
+                    st.session_state.location_requested = False
+                elif 'lat' in location_result and 'lon' in location_result:
+                    lat = location_result['lat']
+                    lon = location_result['lon']
+                    st.session_state.user_location = {'lat': lat, 'lon': lon}
+                    st.session_state.location_permission_granted = True
                     
-                    # Parse results and show map
-                    facilities_df = parse_facilities_to_df(results_text)
+                    # Get address from coordinates
+                    address = reverse_geocode(lat, lon)
                     
-                    if not facilities_df.empty:
-                        # Add user location to map
-                        user_df = pd.DataFrame([{
-                            "name": "Your Location",
-                            "address": address or f"Lat: {lat}, Lon: {lon}",
-                            "lat": lat,
-                            "lon": lon
-                        }])
+                    if address:
+                        st.success(f"✅ Location detected: {address}")
+                        st.caption(f"Coordinates: {lat:.6f}, {lon:.6f}")
+                    else:
+                        st.success(f"✅ Location detected at coordinates: {lat:.6f}, {lon:.6f}")
+                    
+                    # Automatically search for hospitals
+                    with st.spinner("🔍 Searching nearby hospitals..."):
+                        results_text = find_nearby_facilities_by_coords(lat, lon)
+                        st.markdown("### 🏥 Nearby Hospitals")
+                        st.markdown(results_text)
                         
-                        # Combine user location with facilities
-                        combined_df = pd.concat([user_df, facilities_df], ignore_index=True)
+                        # Parse results and show map
+                        facilities_df = parse_facilities_to_df(results_text)
                         
-                        st.markdown("---")
-                        st.markdown("### 📍 Hospital Locations Map")
-                        st.map(combined_df, zoom=13)
-                        
-                        # Show facilities in a list
-                        st.markdown("### 📋 Hospitals Nearby")
-                        for idx, row in facilities_df.iterrows():
-                            if "lat" in row and "lon" in row:
-                                st.markdown(f"**{idx + 1}. {row['name']}**")
-                                st.markdown(f"📍 {row['address']}")
-                                st.markdown(f"Coordinates: ({row['lat']:.4f}, {row['lon']:.4f})")
-                            else:
-                                st.markdown(f"**{idx + 1}. {row['name']}**")
-                                st.markdown(f"📍 {row['address']}")
+                        if not facilities_df.empty:
+                            # Add user location to map
+                            user_df = pd.DataFrame([{
+                                "name": "Your Location",
+                                "address": address or f"Lat: {lat}, Lon: {lon}",
+                                "lat": lat,
+                                "lon": lon
+                            }])
+                            
+                            # Combine user location with facilities
+                            combined_df = pd.concat([user_df, facilities_df], ignore_index=True)
+                            
                             st.markdown("---")
-                
-                # Reset auto location flag after successful location
-                st.session_state.use_auto_location = False
-            elif location_data is not None:
-                st.warning("⚠️ Unable to get your location. Please check your browser permissions or try searching by address.")
-                st.session_state.use_auto_location = False
+                            st.markdown("### 📍 Hospital Locations Map")
+                            st.map(combined_df, zoom=13)
+                            
+                            # Show facilities in a list
+                            st.markdown("### 📋 Hospitals Nearby")
+                            for idx, row in facilities_df.iterrows():
+                                if "lat" in row and "lon" in row:
+                                    st.markdown(f"**{idx + 1}. {row['name']}**")
+                                    st.markdown(f"📍 {row['address']}")
+                                    st.markdown(f"Coordinates: ({row['lat']:.4f}, {row['lon']:.4f})")
+                                else:
+                                    st.markdown(f"**{idx + 1}. {row['name']}**")
+                                    st.markdown(f"📍 {row['address']}")
+                                st.markdown("---")
+                else:
+                    # Still waiting for user to respond to the native browser permission popup
+                    st.info("📍 **Please respond to the browser permission popup that appeared in the top-right corner of your browser.**")
         except Exception as e:
             st.error(f"Error getting location: {e}")
             st.info("💡 Please try searching by address instead, or check your browser's location permissions.")
-            st.session_state.use_auto_location = False
+            st.session_state.location_requested = False
     
-    # Handle manual search by address
-    elif search_location:
+    # Show location status if already granted
+    elif st.session_state.location_permission_granted and st.session_state.user_location:
+        lat = st.session_state.user_location['lat']
+        lon = st.session_state.user_location['lon']
+        address = reverse_geocode(lat, lon)
+        if address:
+            st.success(f"✅ Using your location: {address}")
+        else:
+            st.success(f"✅ Using your location: {lat:.6f}, {lon:.6f}")
+        
+        # Option to search again with current location
+        if st.button("🔍 Search Hospitals Near Me", type="primary"):
+            with st.spinner("🔍 Searching nearby hospitals..."):
+                results_text = find_nearby_facilities_by_coords(lat, lon)
+                st.markdown("### 🏥 Nearby Hospitals")
+                st.markdown(results_text)
+                
+                # Parse results and show map
+                facilities_df = parse_facilities_to_df(results_text)
+                
+                if not facilities_df.empty:
+                    # Add user location to map
+                    user_df = pd.DataFrame([{
+                        "name": "Your Location",
+                        "address": address or f"Lat: {lat}, Lon: {lon}",
+                        "lat": lat,
+                        "lon": lon
+                    }])
+                    
+                    # Combine user location with facilities
+                    combined_df = pd.concat([user_df, facilities_df], ignore_index=True)
+                    
+                    st.markdown("---")
+                    st.markdown("### 📍 Hospital Locations Map")
+                    st.map(combined_df, zoom=13)
+                    
+                    # Show facilities in a list
+                    st.markdown("### 📋 Hospitals Nearby")
+                    for idx, row in facilities_df.iterrows():
+                        if "lat" in row and "lon" in row:
+                            st.markdown(f"**{idx + 1}. {row['name']}**")
+                            st.markdown(f"📍 {row['address']}")
+                            st.markdown(f"Coordinates: ({row['lat']:.4f}, {row['lon']:.4f})")
+                        else:
+                            st.markdown(f"**{idx + 1}. {row['name']}**")
+                            st.markdown(f"📍 {row['address']}")
+                        st.markdown("---")
+    
+    # Handle manual search by address (independent of location permission)
+    if search_location:
         if location_query.strip():
             with st.spinner("🔍 Searching nearby hospitals..."):
                 results_text = find_nearby_facilities(location_query)

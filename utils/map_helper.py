@@ -4,7 +4,32 @@ import pandas as pd
 import re
 import requests
 from typing import Tuple, Optional
+from streamlit_js_eval import streamlit_js_eval
 
+
+
+def request_location_permission():
+    """
+    Requests location access from the user's browser and stores coordinates in session_state.
+    """
+    st.subheader("📍 Location Access Required")
+
+    result = streamlit_js_eval(
+        js_expressions="navigator.geolocation.getCurrentPosition((pos) => ({lat: pos.coords.latitude, lon: pos.coords.longitude}))",
+        key="get_location",
+        want_output=True,
+    )
+
+    if result and isinstance(result, dict) and "lat" in result:
+        st.session_state["user_location"] = result
+        st.success("✅ Location access granted.")
+        return True
+    elif result is False:
+        st.error("❌ Location access denied. Please enter your location manually.")
+        return False
+    else:
+        st.info("Waiting for location permission...")
+        return None
 
 def geocode_address(address: str) -> Optional[Tuple[float, float]]:
     """
